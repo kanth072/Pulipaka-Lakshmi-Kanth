@@ -14,26 +14,29 @@ const parseDataUrl = (dataUrl: string) => {
 };
 
 export const generateProfessionalListing = async (
-  imageBase64: string,
+  imagesBase64: string[],
   rawDescription: string
 ): Promise<ProductListing> => {
-  const { mimeType, data } = parseDataUrl(imageBase64);
+  const imageParts = imagesBase64.map(img => {
+    const { mimeType, data } = parseDataUrl(img);
+    return {
+      inlineData: {
+        mimeType,
+        data,
+      },
+    };
+  });
 
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: {
       parts: [
-        {
-          inlineData: {
-            mimeType: mimeType,
-            data: data,
-          },
-        },
+        ...imageParts,
         {
           text: `Act as an expert Flipkart Catalog Manager. 
-          Analyze the product image and these raw notes: "${rawDescription}".
+          Analyze these product images (multiple angles) and these raw notes: "${rawDescription}".
           
-          TASK: Generate a professional product listing that meets Flipkart Marketplace Quality Standards.
+          TASK: Generate a professional product listing that meets Flipkart Marketplace Quality Standards based on the visual evidence across all photos.
           
           FLIPKART STANDARDS:
           1. TITLE: Must follow: [Brand Name] [Model/Series] [Primary Feature] [Material] [Color]. Max 150 chars.

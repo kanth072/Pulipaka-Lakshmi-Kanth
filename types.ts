@@ -14,7 +14,7 @@ export interface GeneratedVariant {
 }
 
 export interface AppState {
-  originalImage: string | null;
+  originalImages: string[];
   rawDescription: string;
   isProcessing: boolean;
   listing: ProductListing | null;

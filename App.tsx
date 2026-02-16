@@ -60,7 +60,7 @@ const App: React.FC = () => {
   });
 
   const [state, setState] = useState<AppState>({
-    originalImage: null,
+    originalImages: [],
     rawDescription: '',
     isProcessing: false,
     listing: null,
@@ -137,41 +137,61 @@ const App: React.FC = () => {
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setState(prev => ({ ...prev, originalImage: reader.result as string, error: null }));
-      };
-      reader.readAsDataURL(file);
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      const readers = Array.from(files).map(file => {
+        return new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+      });
+
+      Promise.all(readers).then(newImages => {
+        setState(prev => ({ 
+          ...prev, 
+          originalImages: [...prev.originalImages, ...newImages], 
+          error: null 
+        }));
+      });
     }
   };
 
+  const removeImage = (index: number) => {
+    setState(prev => ({
+      ...prev,
+      originalImages: prev.originalImages.filter((_, i) => i !== index)
+    }));
+  };
+
   const runPipeline = async () => {
-    if (!state.originalImage) {
-      setState(prev => ({ ...prev, error: "Please upload a product photo first." }));
+    if (state.originalImages.length === 0) {
+      setState(prev => ({ ...prev, error: "Please upload at least one product photo." }));
       return;
     }
 
     setState(prev => ({ 
       ...prev, 
       isProcessing: true, 
-      statusMessage: '🤖 Developing Flipkart-Standard Catalog...',
+      statusMessage: `🤖 Analyzing ${state.originalImages.length} photo perspective(s)...`,
       error: null,
       variants: [],
       listing: null
     }));
 
     try {
-      const listing = await generateProfessionalListing(state.originalImage, state.rawDescription);
+      const listing = await generateProfessionalListing(state.originalImages, state.rawDescription);
       setState(prev => ({ ...prev, listing, statusMessage: '🎨 Rendering Studio Variant...' }));
 
       const variantTypes: ('Studio' | 'Lifestyle' | 'Contextual')[] = ['Studio', 'Lifestyle', 'Contextual'];
       const newVariants: GeneratedVariant[] = [];
 
+      // Use the first image as the primary reference for variants
+      const primaryImage = state.originalImages[0];
+
       for (const type of variantTypes) {
         setState(prev => ({ ...prev, statusMessage: `🎨 Rendering HD ${type} variant...` }));
-        const imageUrl = await generateImageVariant(state.originalImage!, type, listing.title);
+        const imageUrl = await generateImageVariant(primaryImage, type, listing.title);
         
         const variant: GeneratedVariant = {
           id: Math.random().toString(36).substr(2, 9),
@@ -212,21 +232,40 @@ const App: React.FC = () => {
         </div>
 
         <section>
-          <label className={`block text-sm font-bold mb-3 uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Step 1: Upload Photo</label>
+          <label className={`block text-sm font-bold mb-3 uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Step 1: Product Photos</label>
           <div className={`p-5 border-2 border-dashed rounded-xl transition-all group ${isDark ? 'bg-slate-800 border-slate-700 hover:border-[#ff4b4b]' : 'bg-slate-50 border-slate-200 hover:border-[#ff4b4b]'}`}>
             <input 
               type="file" 
               accept="image/*" 
+              multiple
               onChange={handleFileChange} 
               className={`text-xs w-full cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-[#ff4b4b] file:text-white hover:file:bg-[#e63939] ${isDark ? 'text-slate-400' : 'text-slate-600'}`} 
             />
-            {state.originalImage && (
-              <div className="relative mt-4">
-                <img src={state.originalImage} className={`rounded-lg border-2 shadow-md w-full h-40 object-contain transition-colors ${isDark ? 'border-slate-700 bg-slate-900' : 'border-white bg-white'}`} alt="Original" />
-                <div className="absolute top-2 right-2 bg-green-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">READY</div>
+            
+            {state.originalImages.length > 0 && (
+              <div className="mt-6 grid grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                {state.originalImages.map((img, idx) => (
+                  <div key={idx} className="relative group/thumb">
+                    <img src={img} className={`rounded-lg border-2 shadow-sm w-full h-24 object-cover transition-colors ${isDark ? 'border-slate-700 bg-slate-900' : 'border-white bg-white'}`} alt={`Product ${idx}`} />
+                    <button 
+                      onClick={() => removeImage(idx)}
+                      className="absolute -top-1 -right-1 bg-red-500 text-white w-5 h-5 rounded-full text-[10px] flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity"
+                    >
+                      <i className="fas fa-times"></i>
+                    </button>
+                    {idx === 0 && (
+                      <div className="absolute bottom-1 left-1 bg-blue-500 text-white text-[8px] px-1.5 py-0.5 rounded uppercase font-bold">Primary</div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
+          {state.originalImages.length > 0 && (
+            <p className={`text-[10px] mt-2 font-bold italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              <i className="fas fa-camera-retro mr-1"></i> {state.originalImages.length} images uploaded. AI will analyze all angles.
+            </p>
+          )}
         </section>
 
         <section>
@@ -254,7 +293,7 @@ const App: React.FC = () => {
               value={state.rawDescription}
               onChange={(e) => setState(prev => ({ ...prev, rawDescription: e.target.value }))}
               placeholder="Dictate features like brand, material, and color..."
-              className={`w-full rounded-xl border-2 p-4 text-sm h-48 focus:border-[#ff4b4b] focus:ring-0 outline-none transition-all shadow-inner font-medium block ${isDark ? 'bg-slate-950 border-slate-800 text-slate-100 placeholder-slate-600' : 'bg-white border-slate-100 text-slate-900 placeholder-slate-400'}`}
+              className={`w-full rounded-xl border-2 p-4 text-sm h-32 focus:border-[#ff4b4b] focus:ring-0 outline-none transition-all shadow-inner font-medium block ${isDark ? 'bg-slate-950 border-slate-800 text-slate-100 placeholder-slate-600' : 'bg-white border-slate-100 text-slate-900 placeholder-slate-400'}`}
             />
             {interimText && (
               <div className={`absolute bottom-2 left-4 right-4 backdrop-blur-sm p-2 rounded-lg border text-[11px] italic font-medium animate-pulse ${isDark ? 'bg-slate-900/90 border-red-900 text-red-400' : 'bg-white/90 border-red-100 text-red-500'}`}>
@@ -289,7 +328,7 @@ const App: React.FC = () => {
 
         <div className={`mt-auto pt-8 border-t text-[10px] font-bold flex justify-between tracking-widest uppercase transition-colors ${isDark ? 'border-slate-800 text-slate-600' : 'border-slate-100 text-slate-400'}`}>
           <span>Flipkart Optimized</span>
-          <span>v1.5.0</span>
+          <span>v1.6.0</span>
         </div>
       </aside>
 
@@ -298,7 +337,7 @@ const App: React.FC = () => {
         <div className="max-w-[850px] mx-auto">
           
           <StHeader isDark={isDark}>Product Asset Pipeline</StHeader>
-          <p className={`font-medium -mt-4 mb-12 text-lg transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Generate high-conversion, marketplace-ready assets in seconds.</p>
+          <p className={`font-medium -mt-4 mb-12 text-lg transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Generate high-conversion, marketplace-ready assets from multiple angles.</p>
 
           {!state.isProcessing && !state.listing && (
             <div className={`border-2 border-dashed rounded-3xl p-32 text-center shadow-sm transition-all ${isDark ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
@@ -306,7 +345,7 @@ const App: React.FC = () => {
                 <i className={`fas fa-layer-group text-3xl transition-colors ${isDark ? 'text-slate-700' : 'text-slate-300'}`}></i>
               </div>
               <p className={`font-bold text-xl tracking-tight transition-colors ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>System Idle. Awaiting pipeline triggers.</p>
-              <p className={`text-sm mt-2 transition-colors ${isDark ? 'text-slate-700' : 'text-slate-300'}`}>Upload and describe your product in the left panel.</p>
+              <p className={`text-sm mt-2 transition-colors ${isDark ? 'text-slate-700' : 'text-slate-300'}`}>Upload multiple product photos and describe them in the left panel.</p>
             </div>
           )}
 
@@ -314,7 +353,7 @@ const App: React.FC = () => {
           
           {state.listing && (
             <div className="animate-in fade-in slide-in-from-bottom-10 duration-700">
-              <StSuccess isDark={isDark}>Flipkart-Standard Catalog Draft Created</StSuccess>
+              <StSuccess isDark={isDark}>Multi-Angle Flipkart Catalog Draft Created</StSuccess>
               
               <div className={`border rounded-2xl p-8 shadow-xl mb-12 relative overflow-hidden transition-colors ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                 <div className={`absolute top-0 right-0 p-4 opacity-5 transition-colors ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
@@ -368,8 +407,8 @@ const App: React.FC = () => {
             <div className="mt-20 animate-in fade-in slide-in-from-top-10 duration-1000">
               <div className="flex justify-between items-end mb-8">
                 <div>
-                  <StSubheader isDark={isDark}><i className="fas fa-images text-[#ff4b4b]"></i> Catalog Assets</StSubheader>
-                  <p className={`text-sm font-medium transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Download these HD variants for your Flipkart product gallery.</p>
+                  <StSubheader isDark={isDark}><i className="fas fa-images text-[#ff4b4b]"></i> Generated HD Gallery</StSubheader>
+                  <p className={`text-sm font-medium transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Enhanced variants generated using your primary photo.</p>
                 </div>
               </div>
               
@@ -396,13 +435,6 @@ const App: React.FC = () => {
                       </button>
                     </div>
                     <img src={variant.url} alt={variant.type} className={`w-full object-cover aspect-square transition-colors ${isDark ? 'bg-slate-950' : 'bg-white'}`} />
-                    <div className={`p-6 flex justify-between items-center text-[9px] font-black border-t uppercase tracking-widest transition-colors ${isDark ? 'bg-slate-800/50 text-slate-500 border-slate-800' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
-                      <div className="flex gap-4">
-                        <span>MODEL: GENAI v2.5 IMAGEN</span>
-                        <span>RES: 1024 PX</span>
-                      </div>
-                      <span className="text-[#ff4b4b]">Verified Asset</span>
-                    </div>
                   </div>
                 ))}
               </div>

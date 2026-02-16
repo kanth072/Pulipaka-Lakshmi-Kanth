@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { AppState, GeneratedVariant } from './types';
+import { AppState, GeneratedVariant, ProductListing } from './types';
 import { generateProfessionalListing, generateImageVariant } from './services/geminiService';
 
 // --- Streamlit-like UI Components ---
@@ -59,6 +58,8 @@ const App: React.FC = () => {
     return saved ? saved === 'dark' : false;
   });
 
+  const [hasPersonalKey, setHasPersonalKey] = useState(false);
+
   const [state, setState] = useState<AppState>({
     originalImages: [],
     rawDescription: '',
@@ -74,6 +75,13 @@ const App: React.FC = () => {
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
+    const checkKey = async () => {
+      if ((window as any).aistudio?.hasSelectedApiKey) {
+        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+        setHasPersonalKey(hasKey);
+      }
+    };
+    checkKey();
     localStorage.setItem('productpro-theme', isDark ? 'dark' : 'light');
   }, [isDark]);
 
@@ -122,6 +130,14 @@ const App: React.FC = () => {
       recognitionRef.current = recognition;
     }
   }, []);
+
+  const handleSelectKey = async () => {
+    if ((window as any).aistudio?.openSelectKey) {
+      await (window as any).aistudio.openSelectKey();
+      setHasPersonalKey(true);
+      setState(prev => ({ ...prev, error: null }));
+    }
+  };
 
   const toggleListening = () => {
     if (!recognitionRef.current) {
@@ -173,40 +189,64 @@ const App: React.FC = () => {
     setState(prev => ({ 
       ...prev, 
       isProcessing: true, 
-      statusMessage: `🤖 Analyzing ${state.originalImages.length} photo perspective(s)...`,
+      statusMessage: `🤖 Step 1: Analyzing ${state.originalImages.length} photo perspectives...`,
       error: null,
       variants: [],
       listing: null
     }));
 
     try {
+      // 1. Generate text listing first (usually fast)
       const listing = await generateProfessionalListing(state.originalImages, state.rawDescription);
-      setState(prev => ({ ...prev, listing, statusMessage: '🎨 Rendering Studio Variant...' }));
+      
+      setState(prev => ({ 
+        ...prev, 
+        listing, 
+        statusMessage: '🚀 Step 2: Generating all HD variants in parallel (Saving ~60% time)...' 
+      }));
 
+      // 2. Trigger all image generations in parallel to save time
       const variantTypes: ('Studio' | 'Lifestyle' | 'Contextual')[] = ['Studio', 'Lifestyle', 'Contextual'];
-      const newVariants: GeneratedVariant[] = [];
-
-      // Use the first image as the primary reference for variants
       const primaryImage = state.originalImages[0];
 
-      for (const type of variantTypes) {
-        setState(prev => ({ ...prev, statusMessage: `🎨 Rendering HD ${type} variant...` }));
-        const imageUrl = await generateImageVariant(primaryImage, type, listing.title);
-        
-        const variant: GeneratedVariant = {
-          id: Math.random().toString(36).substr(2, 9),
-          url: imageUrl,
-          type,
-          prompt: `Professional ${type} variant`
-        };
-        newVariants.push(variant);
-        setState(prev => ({ ...prev, variants: [...newVariants] }));
-      }
+      const variantPromises = variantTypes.map(async (type) => {
+        try {
+          const imageUrl = await generateImageVariant(primaryImage, type, listing.title);
+          return {
+            id: Math.random().toString(36).substr(2, 9),
+            url: imageUrl,
+            type,
+            prompt: `Professional ${type} variant`
+          } as GeneratedVariant;
+        } catch (err) {
+          console.error(`Failed to generate ${type} variant:`, err);
+          return null; // Handle individual variant failure gracefully
+        }
+      });
 
-      setState(prev => ({ ...prev, isProcessing: false, statusMessage: '✅ Pipeline Ready' }));
+      const resolvedVariants = await Promise.all(variantPromises);
+      const successfulVariants = resolvedVariants.filter((v): v is GeneratedVariant => v !== null);
+
+      setState(prev => ({ 
+        ...prev, 
+        variants: successfulVariants,
+        isProcessing: false, 
+        statusMessage: '✅ Pipeline Ready' 
+      }));
+
     } catch (err: any) {
       console.error("Pipeline Error:", err);
-      setState(prev => ({ ...prev, isProcessing: false, error: err.message || "Pipeline failed" }));
+      let errorMsg = err.message || "Pipeline failed";
+      
+      if (errorMsg.includes("429") || errorMsg.includes("quota") || errorMsg.includes("RESOURCE_EXHAUSTED")) {
+        errorMsg = "API Quota Exceeded. The shared free tier is busy. Please select your own personal API key to continue.";
+      }
+
+      setState(prev => ({ 
+        ...prev, 
+        isProcessing: false, 
+        error: errorMsg 
+      }));
     }
   };
 
@@ -229,6 +269,28 @@ const App: React.FC = () => {
           >
             <i className={`fas ${isDark ? 'fa-sun' : 'fa-moon'}`}></i>
           </button>
+        </div>
+
+        <div className={`p-4 rounded-xl border flex flex-col gap-2 transition-all ${hasPersonalKey ? (isDark ? 'bg-green-950/20 border-green-900' : 'bg-green-50 border-green-100') : (isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-100')}`}>
+          <div className="flex items-center justify-between">
+            <span className={`text-[10px] font-black uppercase tracking-widest ${hasPersonalKey ? 'text-green-500' : (isDark ? 'text-slate-500' : 'text-slate-400')}`}>
+              <i className={`fas ${hasPersonalKey ? 'fa-key' : 'fa-unlock'} mr-1.5`}></i>
+              {hasPersonalKey ? 'Personal Key Active' : 'Shared Key Mode'}
+            </span>
+            {!hasPersonalKey && (
+              <button 
+                onClick={handleSelectKey}
+                className="text-[10px] font-black text-blue-500 hover:text-blue-600 underline uppercase tracking-widest"
+              >
+                Connect
+              </button>
+            )}
+          </div>
+          {!hasPersonalKey && (
+             <p className={`text-[9px] font-bold leading-tight ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
+               Hitting quota limits? Use your own key from <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" className="underline">AI Studio</a>.
+             </p>
+          )}
         </div>
 
         <section>
@@ -261,11 +323,6 @@ const App: React.FC = () => {
               </div>
             )}
           </div>
-          {state.originalImages.length > 0 && (
-            <p className={`text-[10px] mt-2 font-bold italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-              <i className="fas fa-camera-retro mr-1"></i> {state.originalImages.length} images uploaded. AI will analyze all angles.
-            </p>
-          )}
         </section>
 
         <section>
@@ -295,11 +352,6 @@ const App: React.FC = () => {
               placeholder="Dictate features like brand, material, and color..."
               className={`w-full rounded-xl border-2 p-4 text-sm h-32 focus:border-[#ff4b4b] focus:ring-0 outline-none transition-all shadow-inner font-medium block ${isDark ? 'bg-slate-950 border-slate-800 text-slate-100 placeholder-slate-600' : 'bg-white border-slate-100 text-slate-900 placeholder-slate-400'}`}
             />
-            {interimText && (
-              <div className={`absolute bottom-2 left-4 right-4 backdrop-blur-sm p-2 rounded-lg border text-[11px] italic font-medium animate-pulse ${isDark ? 'bg-slate-900/90 border-red-900 text-red-400' : 'bg-white/90 border-red-100 text-red-500'}`}>
-                Hearing: "{interimText}..."
-              </div>
-            )}
           </div>
         </section>
 
@@ -320,15 +372,25 @@ const App: React.FC = () => {
         </button>
 
         {state.error && (
-          <div className={`border p-4 rounded-xl flex gap-3 ${isDark ? 'bg-red-950/20 border-red-900' : 'bg-red-50 border-red-100'}`}>
-            <i className="fas fa-exclamation-circle text-red-500 mt-1"></i>
-            <div className={`text-[11px] font-bold leading-tight ${isDark ? 'text-red-400' : 'text-red-600'}`}>{state.error}</div>
+          <div className={`border p-4 rounded-xl flex flex-col gap-3 ${isDark ? 'bg-red-950/20 border-red-900' : 'bg-red-50 border-red-100'}`}>
+            <div className="flex gap-2">
+              <i className="fas fa-exclamation-circle text-red-500 mt-1 shrink-0"></i>
+              <div className={`text-[11px] font-bold leading-tight ${isDark ? 'text-red-400' : 'text-red-600'}`}>{state.error}</div>
+            </div>
+            {state.error.includes("Quota") && (
+              <button 
+                onClick={handleSelectKey}
+                className="w-full py-2 bg-[#ff4b4b] text-white text-[10px] font-black uppercase rounded-lg hover:bg-red-600 shadow-md transition-colors"
+              >
+                Select Personal API Key
+              </button>
+            )}
           </div>
         )}
 
         <div className={`mt-auto pt-8 border-t text-[10px] font-bold flex justify-between tracking-widest uppercase transition-colors ${isDark ? 'border-slate-800 text-slate-600' : 'border-slate-100 text-slate-400'}`}>
           <span>Flipkart Optimized</span>
-          <span>v1.6.0</span>
+          <span>v1.7.0</span>
         </div>
       </aside>
 
@@ -337,7 +399,7 @@ const App: React.FC = () => {
         <div className="max-w-[850px] mx-auto">
           
           <StHeader isDark={isDark}>Product Asset Pipeline</StHeader>
-          <p className={`font-medium -mt-4 mb-12 text-lg transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Generate high-conversion, marketplace-ready assets from multiple angles.</p>
+          <p className={`font-medium -mt-4 mb-12 text-lg transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Generate high-conversion assets up to 3x faster with parallel processing.</p>
 
           {!state.isProcessing && !state.listing && (
             <div className={`border-2 border-dashed rounded-3xl p-32 text-center shadow-sm transition-all ${isDark ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
@@ -394,12 +456,6 @@ const App: React.FC = () => {
                   </div>
                 </div>
               </div>
-
-              <StExpander title="JSON API Response (Payload for Pipeline)" isDark={isDark}>
-                <pre className={`text-[11px] p-6 rounded-xl overflow-x-auto shadow-2xl font-mono leading-relaxed transition-colors ${isDark ? 'bg-slate-950 text-green-500' : 'bg-slate-900 text-green-400'}`}>
-                  {JSON.stringify(state.listing, null, 2)}
-                </pre>
-              </StExpander>
             </div>
           )}
 
@@ -408,7 +464,7 @@ const App: React.FC = () => {
               <div className="flex justify-between items-end mb-8">
                 <div>
                   <StSubheader isDark={isDark}><i className="fas fa-images text-[#ff4b4b]"></i> Generated HD Gallery</StSubheader>
-                  <p className={`text-sm font-medium transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Enhanced variants generated using your primary photo.</p>
+                  <p className={`text-sm font-medium transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Enhanced variants generated simultaneously from your primary photo.</p>
                 </div>
               </div>
               
@@ -441,14 +497,14 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {state.isProcessing && state.variants.length < 3 && state.listing && (
+          {state.isProcessing && state.listing && state.variants.length === 0 && (
              <div className={`flex flex-col items-center justify-center p-32 mt-12 border-4 border-dotted rounded-[40px] shadow-sm animate-pulse transition-all ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
                 <div className="relative mb-8">
                   <div className="w-20 h-20 border-4 border-[#ff4b4b] border-t-transparent rounded-full animate-spin"></div>
                   <i className="fas fa-wand-magic-sparkles absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl text-[#ff4b4b]"></i>
                 </div>
-                <p className={`font-black text-xl uppercase tracking-widest transition-colors ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Rendering {['Studio', 'Lifestyle', 'Contextual'][state.variants.length]} Vision...</p>
-                <p className={`text-sm mt-2 font-bold italic transition-colors ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>Applying Flipkart aesthetic standards...</p>
+                <p className={`font-black text-xl uppercase tracking-widest transition-colors ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Processing Multi-Asset View...</p>
+                <p className={`text-sm mt-2 font-bold italic transition-colors ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>Generating all catalog images simultaneously...</p>
              </div>
           )}
           

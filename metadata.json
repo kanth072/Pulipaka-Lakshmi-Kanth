@@ -1,5 +1,5 @@
 {
-  "name": "product-pro-pipeline",
+  "name": "product-pro",
   "description": "An AI-powered e-commerce pipeline that transforms raw product photos and basic descriptions into professional Flipkart-ready listings with HD variant images and optimized copy.",
   "requestFramePermissions": [
     "camera",

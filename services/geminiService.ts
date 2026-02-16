@@ -1,8 +1,5 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProductListing } from "../types";
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 /**
  * Extracts the base64 data and mime type from a data URL
@@ -17,6 +14,9 @@ export const generateProfessionalListing = async (
   imagesBase64: string[],
   rawDescription: string
 ): Promise<ProductListing> => {
+  // Initialize right before call to ensure up-to-date API key
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+
   const imageParts = imagesBase64.map(img => {
     const { mimeType, data } = parseDataUrl(img);
     return {
@@ -76,8 +76,9 @@ export const generateProfessionalListing = async (
     },
   });
 
-  if (!response.text) throw new Error("No response text from Gemini");
-  return JSON.parse(response.text.trim()) as ProductListing;
+  const text = response.text;
+  if (!text) throw new Error("No response text from Gemini");
+  return JSON.parse(text.trim()) as ProductListing;
 };
 
 export const generateImageVariant = async (
@@ -85,6 +86,9 @@ export const generateImageVariant = async (
   variantType: 'Studio' | 'Lifestyle' | 'Contextual',
   productTitle: string
 ): Promise<string> => {
+  // Initialize right before call to ensure up-to-date API key
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  
   const { mimeType, data } = parseDataUrl(originalImageBase64);
 
   const prompts = {

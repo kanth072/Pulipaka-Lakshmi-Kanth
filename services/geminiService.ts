@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProductListing } from "../types";
 
@@ -14,8 +15,9 @@ export const generateProfessionalListing = async (
   imagesBase64: string[],
   rawDescription: string
 ): Promise<ProductListing> => {
-  // Initialize right before call to ensure up-to-date API key
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Fix: Initializing GoogleGenAI instance right before making an API call as per guidelines.
+  // Always use { apiKey: process.env.API_KEY } directly.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const imageParts = imagesBase64.map(img => {
     const { mimeType, data } = parseDataUrl(img);
@@ -76,6 +78,7 @@ export const generateProfessionalListing = async (
     },
   });
 
+  // Fix: Directly accessing .text property (not a method) as per guidelines.
   const text = response.text;
   if (!text) throw new Error("No response text from Gemini");
   return JSON.parse(text.trim()) as ProductListing;
@@ -86,8 +89,9 @@ export const generateImageVariant = async (
   variantType: 'Studio' | 'Lifestyle' | 'Contextual',
   productTitle: string
 ): Promise<string> => {
-  // Initialize right before call to ensure up-to-date API key
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Fix: Initializing GoogleGenAI instance right before making an API call as per guidelines.
+  // Always use { apiKey: process.env.API_KEY } directly.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const { mimeType, data } = parseDataUrl(originalImageBase64);
 
@@ -120,6 +124,7 @@ export const generateImageVariant = async (
   });
 
   let imageUrl = '';
+  // Fix: Iterating through parts to find the image part, not assuming it's the first one.
   const candidate = response.candidates?.[0];
   if (candidate?.content?.parts) {
     for (const part of candidate.content.parts) {

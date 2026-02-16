@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProductListing } from "../types";
 
@@ -12,7 +11,7 @@ export const generateProfessionalListing = async (
   imagesBase64: string[],
   rawDescription: string
 ): Promise<ProductListing> => {
-  // Fix: Create instance inside function to use current process.env.API_KEY.
+  // Always initialize with latest API_KEY to ensure bridge functionality works instantly
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const imageParts = imagesBase64.map(img => {
@@ -26,18 +25,18 @@ export const generateProfessionalListing = async (
       parts: [
         ...imageParts,
         {
-          text: `Act as a senior marketplace content specialist. 
-          Analyze the attached product photos and these raw details: "${rawDescription}".
+          text: `Act as a senior marketplace content specialist for Flipkart/Amazon.
+          Analyze these images and notes: "${rawDescription}".
           
-          TASK: Create a professional e-commerce listing suitable for Flipkart/Amazon.
+          TASK: Create a professional e-commerce catalog entry.
           
-          GUIDELINES:
-          1. TITLE: Structured as [Brand] [Model] [Main Feature] [Color]. High SEO value.
-          2. DESCRIPTION: Persuasive, benefits-driven, 3-4 sentences.
-          3. KEY FEATURES: List 5 distinct selling points.
-          4. SPECIFICATIONS: Extract key data (Material, Dimensions, etc.) into key-value pairs.
+          CRITERIA:
+          1. TITLE: [Brand] [Model] [Feature] [Color]. SEO Optimized.
+          2. DESCRIPTION: High-conversion copywriting, 3-4 sentences.
+          3. KEY FEATURES: Top 5 bullet points.
+          4. SPECIFICATIONS: Extract technical specs from visual data as key-value pairs.
           
-          Return as structured JSON.`,
+          Return as JSON.`,
         },
       ],
     },
@@ -67,7 +66,7 @@ export const generateProfessionalListing = async (
   });
 
   const text = response.text;
-  if (!text) throw new Error("Catalog engine returned an empty response.");
+  if (!text) throw new Error("Catalog service returned an empty result.");
   return JSON.parse(text.trim()) as ProductListing;
 };
 
@@ -76,15 +75,14 @@ export const generateImageVariant = async (
   variantType: 'Studio' | 'Lifestyle' | 'Contextual',
   productTitle: string
 ): Promise<string> => {
-  // Fix: Create instance inside function to ensure latest API key usage.
+  // Always initialize inside the call for real-time API Key updates
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const { mimeType, data } = parseDataUrl(originalImageBase64);
 
-  // Refinement: Include productTitle in prompts to improve image generation accuracy.
   const prompts = {
-    'Studio': `High-end professional studio product photograph of "${productTitle}" on a clean white background. Perfect center composition, soft commercial lighting, ultra-sharp 8k resolution. No text, no logos.`,
-    'Lifestyle': `Realistic lifestyle photograph of "${productTitle}" placed in a modern, luxury aesthetically pleasing home setting. Soft sunlight from a window, cinematic depth of field, magazine quality.`,
-    'Contextual': `A professional action shot showing "${productTitle}" being used by a person in its intended environment. Highlights ergonomics and scale. Natural motion blur, high-end photography.`
+    'Studio': `High-end professional studio catalog photograph of "${productTitle}" on a minimalist clean white background. Uniform lighting, sharp focus, magazine quality. No text.`,
+    'Lifestyle': `Premium lifestyle product photo of "${productTitle}" in an elegant home environment. Cinematic depth of field, natural lighting, luxury aesthetic.`,
+    'Contextual': `Professional shot showing the "${productTitle}" product in context. Highlighting ergonomic design and scale. Professional commercial lighting.`
   };
 
   const response = await ai.models.generateContent({
@@ -104,7 +102,6 @@ export const generateImageVariant = async (
   const candidate = response.candidates?.[0];
   if (candidate?.content?.parts) {
     for (const part of candidate.content.parts) {
-      // Fix: Ensure we correctly extract the inlineData part which contains the generated image.
       if (part.inlineData) {
         imageUrl = `data:image/png;base64,${part.inlineData.data}`;
         break;
@@ -112,6 +109,6 @@ export const generateImageVariant = async (
     }
   }
 
-  if (!imageUrl) throw new Error(`Image model did not return a valid asset for ${variantType}.`);
+  if (!imageUrl) throw new Error(`Model did not produce an image candidate for ${variantType}.`);
   return imageUrl;
 };

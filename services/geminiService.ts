@@ -2,9 +2,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProductListing } from "../types";
 
-/**
- * Extracts the base64 data and mime type from a data URL
- */
 const parseDataUrl = (dataUrl: string) => {
   const matches = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
   if (!matches) throw new Error("Invalid image format");
@@ -15,18 +12,12 @@ export const generateProfessionalListing = async (
   imagesBase64: string[],
   rawDescription: string
 ): Promise<ProductListing> => {
-  // Fix: Initializing GoogleGenAI instance right before making an API call as per guidelines.
-  // Always use { apiKey: process.env.API_KEY } directly.
+  // Fix: Create instance inside function to use current process.env.API_KEY.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const imageParts = imagesBase64.map(img => {
     const { mimeType, data } = parseDataUrl(img);
-    return {
-      inlineData: {
-        mimeType,
-        data,
-      },
-    };
+    return { inlineData: { mimeType, data } };
   });
 
   const response = await ai.models.generateContent({
@@ -35,18 +26,18 @@ export const generateProfessionalListing = async (
       parts: [
         ...imageParts,
         {
-          text: `Act as an expert Flipkart Catalog Manager. 
-          Analyze these product images (multiple angles) and these raw notes: "${rawDescription}".
+          text: `Act as a senior marketplace content specialist. 
+          Analyze the attached product photos and these raw details: "${rawDescription}".
           
-          TASK: Generate a professional product listing that meets Flipkart Marketplace Quality Standards based on the visual evidence across all photos.
+          TASK: Create a professional e-commerce listing suitable for Flipkart/Amazon.
           
-          FLIPKART STANDARDS:
-          1. TITLE: Must follow: [Brand Name] [Model/Series] [Primary Feature] [Material] [Color]. Max 150 chars.
-          2. DESCRIPTION: Write a professional 3-4 sentence paragraph. Start with the most important benefit. Use SEO keywords naturally. Focus on 'Why buy this?'.
-          3. KEY FEATURES: Provide 5 high-impact bullet points. Each bullet should be 5-10 words.
-          4. SPECIFICATIONS: Extract technical specs like 'Material', 'Weight', 'Dimensions', 'Color', 'Compatible With', etc.
+          GUIDELINES:
+          1. TITLE: Structured as [Brand] [Model] [Main Feature] [Color]. High SEO value.
+          2. DESCRIPTION: Persuasive, benefits-driven, 3-4 sentences.
+          3. KEY FEATURES: List 5 distinct selling points.
+          4. SPECIFICATIONS: Extract key data (Material, Dimensions, etc.) into key-value pairs.
           
-          Output the response strictly as valid JSON.`,
+          Return as structured JSON.`,
         },
       ],
     },
@@ -57,10 +48,7 @@ export const generateProfessionalListing = async (
         properties: {
           title: { type: Type.STRING },
           description: { type: Type.STRING },
-          keyFeatures: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-          },
+          keyFeatures: { type: Type.ARRAY, items: { type: Type.STRING } },
           specifications: {
             type: Type.ARRAY,
             items: {
@@ -78,9 +66,8 @@ export const generateProfessionalListing = async (
     },
   });
 
-  // Fix: Directly accessing .text property (not a method) as per guidelines.
   const text = response.text;
-  if (!text) throw new Error("No response text from Gemini");
+  if (!text) throw new Error("Catalog engine returned an empty response.");
   return JSON.parse(text.trim()) as ProductListing;
 };
 
@@ -89,45 +76,35 @@ export const generateImageVariant = async (
   variantType: 'Studio' | 'Lifestyle' | 'Contextual',
   productTitle: string
 ): Promise<string> => {
-  // Fix: Initializing GoogleGenAI instance right before making an API call as per guidelines.
-  // Always use { apiKey: process.env.API_KEY } directly.
+  // Fix: Create instance inside function to ensure latest API key usage.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
   const { mimeType, data } = parseDataUrl(originalImageBase64);
 
+  // Refinement: Include productTitle in prompts to improve image generation accuracy.
   const prompts = {
-    'Studio': `High-end professional studio catalog photography of ${productTitle}, crisp white background, perfectly centered, soft commercial lighting, ultra-sharp focus, 8k resolution.`,
-    'Lifestyle': `Premium lifestyle product shot of ${productTitle} in a modern aesthetically pleasing Indian home setting, natural window lighting, cinematic depth of field.`,
-    'Contextual': `Action/Use-case shot of ${productTitle} being handled or used, highlighting its scale and ergonomics, professional color grading, magazine quality.`
+    'Studio': `High-end professional studio product photograph of "${productTitle}" on a clean white background. Perfect center composition, soft commercial lighting, ultra-sharp 8k resolution. No text, no logos.`,
+    'Lifestyle': `Realistic lifestyle photograph of "${productTitle}" placed in a modern, luxury aesthetically pleasing home setting. Soft sunlight from a window, cinematic depth of field, magazine quality.`,
+    'Contextual': `A professional action shot showing "${productTitle}" being used by a person in its intended environment. Highlights ergonomics and scale. Natural motion blur, high-end photography.`
   };
 
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash-image',
     contents: {
       parts: [
-        {
-          inlineData: {
-            mimeType: mimeType,
-            data: data,
-          },
-        },
-        {
-          text: prompts[variantType],
-        },
+        { inlineData: { mimeType, data } },
+        { text: prompts[variantType] },
       ],
     },
     config: {
-      imageConfig: {
-        aspectRatio: "1:1"
-      }
+      imageConfig: { aspectRatio: "1:1" }
     }
   });
 
   let imageUrl = '';
-  // Fix: Iterating through parts to find the image part, not assuming it's the first one.
   const candidate = response.candidates?.[0];
   if (candidate?.content?.parts) {
     for (const part of candidate.content.parts) {
+      // Fix: Ensure we correctly extract the inlineData part which contains the generated image.
       if (part.inlineData) {
         imageUrl = `data:image/png;base64,${part.inlineData.data}`;
         break;
@@ -135,6 +112,6 @@ export const generateImageVariant = async (
     }
   }
 
-  if (!imageUrl) throw new Error(`Failed to generate ${variantType} image variant`);
+  if (!imageUrl) throw new Error(`Image model did not return a valid asset for ${variantType}.`);
   return imageUrl;
 };

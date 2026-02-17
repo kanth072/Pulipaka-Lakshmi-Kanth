@@ -115,34 +115,55 @@ const App: React.FC = () => {
     });
   };
 
-  const generateImagesOnly = async (listingTitle: string) => {
-    setState(prev => ({ ...prev, isProcessing: true, statusMessage: '🎨 Rendering High-HD Assets...', error: null }));
+  const retrySingleVariant = async (type: 'Studio' | 'Lifestyle' | 'Contextual') => {
+    if (!state.listing) return;
+    setState(prev => ({ ...prev, statusMessage: `Retrying ${type} render...`, isProcessing: true }));
     try {
-      const variantTypes: ('Studio' | 'Lifestyle' | 'Contextual')[] = ['Studio', 'Lifestyle', 'Contextual'];
-      const primaryImage = state.originalImages[0];
-      
-      const variantPromises = variantTypes.map(async (type) => {
-        try {
-          const url = await generateImageVariant(primaryImage, type, listingTitle);
-          return { id: Math.random().toString(36).substr(2, 9), url, type, prompt: `High-fidelity ${type} render` } as GeneratedVariant;
-        } catch (e: any) { 
-          console.warn(`Variant ${type} failed:`, e);
-          return null;
-        }
-      });
-
-      const results = await Promise.all(variantPromises);
-      const successful = results.filter((v): v is GeneratedVariant => v !== null);
-      
-      if (successful.length === 0) {
-        throw new Error("Render pipeline busy. Please ensure your Gemini Key is active and billing is verified in Google Cloud.");
-      }
-
-      setState(prev => ({ ...prev, variants: successful, isProcessing: false, statusMessage: '✅ All Assets Synchronized' }));
+      const url = await generateImageVariant(state.originalImages[0], type, state.listing.title);
+      const newVariant: GeneratedVariant = { id: Math.random().toString(36).substr(2, 9), url, type, prompt: `High-fidelity ${type} render` };
+      setState(prev => ({
+        ...prev,
+        variants: [...prev.variants.filter(v => v.type !== type), newVariant],
+        isProcessing: false,
+        error: null
+      }));
     } catch (err: any) {
-      let msg = err.message || "Pipeline Error";
-      if (msg.includes("sk-")) msg = "Incompatible Key: Your key starts with 'sk-', which is an OpenAI key. This app requires a Google Gemini key (starting with 'AIzaSy').";
-      setState(prev => ({ ...prev, isProcessing: false, error: msg }));
+      setState(prev => ({ ...prev, isProcessing: false, error: `Failed to retry ${type}: ${err.message}` }));
+    }
+  };
+
+  const generateImagesOnly = async (listingTitle: string) => {
+    setState(prev => ({ ...prev, isProcessing: true, statusMessage: '🎨 Syncing Render Pipeline...', error: null }));
+    
+    const variantTypes: ('Studio' | 'Lifestyle' | 'Contextual')[] = ['Studio', 'Lifestyle', 'Contextual'];
+    const primaryImage = state.originalImages[0];
+    
+    // We run them sequentially to avoid hitting "Concurrent Request" limits on free keys
+    const newVariants: GeneratedVariant[] = [];
+    let partialFailures = false;
+
+    for (const type of variantTypes) {
+      try {
+        setState(prev => ({ ...prev, statusMessage: `🎨 Rendering ${type} view...` }));
+        const url = await generateImageVariant(primaryImage, type, listingTitle);
+        newVariants.push({ id: Math.random().toString(36).substr(2, 9), url, type, prompt: `High-fidelity ${type} render` });
+        // After each success, update the state so the user sees progress
+        setState(prev => ({ ...prev, variants: [...newVariants] }));
+      } catch (e: any) {
+        console.warn(`Variant ${type} failed:`, e);
+        partialFailures = true;
+      }
+    }
+
+    if (newVariants.length === 0) {
+      setState(prev => ({ ...prev, isProcessing: false, error: "Deployment Limit Hit: All render requests failed. This usually happens on Vercel deployments when many users share the same IP range for a free Gemini key. Please wait 60 seconds or use a Priority Key." }));
+    } else {
+      setState(prev => ({
+        ...prev,
+        isProcessing: false,
+        statusMessage: partialFailures ? '⚠️ Completed with partial success' : '✅ All Assets Synchronized',
+        error: partialFailures ? "Some renders hit rate limits. Use the 'Retry' button on failed assets." : null
+      }));
     }
   };
 
@@ -152,20 +173,20 @@ const App: React.FC = () => {
       return;
     }
 
-    setState(prev => ({ ...prev, isProcessing: true, statusMessage: `🤖 Deep-scanning product visuals...`, error: null, variants: [], listing: null }));
+    setState(prev => ({ ...prev, isProcessing: true, statusMessage: `🤖 Scanning product visuals...`, error: null, variants: [], listing: null }));
 
     try {
       const listing = await generateProfessionalListing(state.originalImages, state.rawDescription);
-      setState(prev => ({ ...prev, listing, statusMessage: '🎨 Generating specialized HD variants...' }));
+      setState(prev => ({ ...prev, listing, statusMessage: '🎨 Listing generated. Starting renders...' }));
       await generateImagesOnly(listing.title);
     } catch (err: any) {
       console.error("Pipeline failure:", err);
       let msg = err.message || "System Fault";
       
       if (msg.includes("sk-") || msg.includes("API key not valid")) {
-        msg = "Unsupported Key Detected. Use a Google Gemini API Key (starts with 'AIzaSy'). OpenAI keys ('sk-...') are not compatible.";
-      } else if (msg.includes("503")) {
-        msg = "Model Overloaded (503). Retrying automatically with backoff...";
+        msg = "Incompatible Key Detected. Ensure your Vercel Environment Variable 'API_KEY' is a Google Gemini Key (starts with 'AIzaSy').";
+      } else if (msg.includes("429") || msg.includes("503") || msg.includes("limit")) {
+        msg = "Model Overloaded or Quota Exceeded (429/503). Vercel deployments often hit limits faster because many users share an IP. Try again in 1 minute.";
       }
       
       setState(prev => ({ ...prev, isProcessing: false, error: msg }));
@@ -197,14 +218,9 @@ const App: React.FC = () => {
           </div>
           <p className="text-[11px] opacity-70 leading-relaxed font-semibold">
             {hasPersonalKey 
-              ? "Your Gemini key is linked. Fast-track production enabled." 
-              : "Using shared resources. Please connect your Gemini key for high reliability."}
+              ? "Your Gemini key is linked. Rate limits will be per-key." 
+              : "Vercel Deployment: Multiple users share the same quota. Connect a personal key to avoid 'Limit Exceeded' errors."}
           </p>
-          <div className="mt-4 flex flex-col gap-2">
-            <a href="https://aistudio.google.com/" target="_blank" rel="noreferrer" className="text-[10px] font-black text-blue-500 hover:underline flex items-center gap-2">
-              <i className="fas fa-key"></i> GET FREE GEMINI KEY
-            </a>
-          </div>
         </div>
 
         <div className="space-y-10">
@@ -244,7 +260,7 @@ const App: React.FC = () => {
 
         <div className="mt-auto pt-8 border-t dark:border-slate-800">
           <button onClick={runPipeline} disabled={state.isProcessing} className={`w-full py-6 rounded-[2rem] font-black text-sm uppercase tracking-widest transition-all shadow-2xl transform ${state.isProcessing ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed' : 'bg-[#ff4b4b] text-white hover:bg-red-600 active:scale-95 shadow-red-500/30'}`}>
-            {state.isProcessing ? <><i className="fas fa-circle-notch fa-spin mr-3"></i> Processing</> : '🚀 Launch Pipeline'}
+            {state.isProcessing ? <><i className="fas fa-circle-notch fa-spin mr-3"></i> Syncing Engine</> : '🚀 Launch Pipeline'}
           </button>
 
           {state.error && (
@@ -253,11 +269,6 @@ const App: React.FC = () => {
                 <i className="fas fa-triangle-exclamation text-lg mt-1"></i>
                 <div className="space-y-4">
                   <p className="text-sm font-black">{state.error}</p>
-                  {state.error.includes("sk-") && (
-                    <div className="p-4 bg-white/10 rounded-2xl text-[10px] font-medium italic border border-white/10">
-                      <strong>Important:</strong> Keys starting with <code>sk-...</code> are for OpenAI. This app is optimized for Google Gemini. Please get an <code>AIzaSy...</code> key from AI Studio.
-                    </div>
-                  )}
                   <button onClick={handleSelectKey} className="w-full py-3 bg-red-500 text-white rounded-2xl uppercase text-[10px] font-black hover:bg-red-600 shadow-lg shadow-red-500/20">Connect Gemini Priority Key</button>
                 </div>
               </div>
@@ -287,15 +298,9 @@ const App: React.FC = () => {
                       <div>
                         <span className="text-3xl font-black tracking-tight block mb-1">{state.statusMessage}</span>
                         <span className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                           <i className="fas fa-server"></i> Parallel GPU Pipeline Active
+                           <i className="fas fa-server"></i> Optimizing API Requests
                         </span>
                       </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                       <span className="text-xs font-black text-red-500 animate-pulse tracking-[0.3em] uppercase">Processing Data</span>
-                       <div className="flex gap-1">
-                          {[1,2,3,4,5].map(i => <div key={i} className="w-2 h-2 rounded-full bg-red-500/20 animate-bounce" style={{animationDelay: `${i*150}ms`}} />)}
-                       </div>
                     </div>
                  </div>
               </div>
@@ -317,40 +322,26 @@ const App: React.FC = () => {
           {state.listing && (
             <div className="space-y-24 animate-in fade-in duration-1000">
               
-              <StCard isDark={isDark} title="Metadata Output (Marketplace-Ready)">
+              <StCard isDark={isDark} title="Metadata Output">
                 <div className="flex justify-between items-start mb-16 border-b dark:border-slate-800 pb-12">
                   <div className="flex-1 pr-20">
-                    <span className="text-[11px] font-black text-red-500 uppercase tracking-[0.5em] block mb-4">Optimized Catalog Title</span>
+                    <span className="text-[11px] font-black text-red-500 uppercase tracking-[0.5em] block mb-4">Optimized Title</span>
                     <h2 className={`text-6xl font-black leading-[1] tracking-tighter ${isDark ? 'text-white' : 'text-slate-900'}`}>{state.listing.title}</h2>
-                  </div>
-                  <div className="shrink-0 flex flex-col items-end gap-3">
-                     <Badge color="green">SEO Verified</Badge>
-                     <span className="text-[10px] font-black opacity-30 uppercase tracking-tighter">Confidence: 99.4%</span>
                   </div>
                 </div>
                 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-20">
                   <div className="lg:col-span-8 space-y-16">
-                    <div>
-                      <h4 className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 mb-8 flex items-center gap-3">
-                         <i className="fas fa-quote-left text-red-500"></i> Editorial Description
-                      </h4>
-                      <p className={`text-3xl leading-[1.4] italic font-medium p-16 rounded-[4rem] border shadow-2xl ${isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50/50 border-slate-200 text-slate-700'}`}>
-                        "{state.listing.description}"
-                      </p>
-                    </div>
-                    <div>
-                      <h4 className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 mb-8">Value Proposition Points</h4>
-                      <div className="grid grid-cols-1 gap-5">
-                        {state.listing.keyFeatures.map((f, i) => (
-                          <div key={i} className={`flex items-center gap-6 text-xl font-bold p-8 rounded-3xl border transition-all hover:scale-[1.01] ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-100 shadow-lg'}`}>
-                            <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center text-green-500">
-                               <i className="fas fa-check"></i>
-                            </div>
-                            {f}
-                          </div>
-                        ))}
-                      </div>
+                    <p className={`text-3xl leading-[1.4] italic font-medium p-16 rounded-[4rem] border shadow-2xl ${isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50/50 border-slate-200 text-slate-700'}`}>
+                      "{state.listing.description}"
+                    </p>
+                    <div className="grid grid-cols-1 gap-5">
+                      {state.listing.keyFeatures.map((f, i) => (
+                        <div key={i} className={`flex items-center gap-6 text-xl font-bold p-8 rounded-3xl border transition-all hover:scale-[1.01] ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-100 shadow-lg'}`}>
+                          <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center text-green-500"><i className="fas fa-check"></i></div>
+                          {f}
+                        </div>
+                      ))}
                     </div>
                   </div>
                   
@@ -374,62 +365,58 @@ const App: React.FC = () => {
                        <div className="w-16 h-16 bg-red-500 rounded-[2rem] flex items-center justify-center text-white text-3xl shadow-2xl shadow-red-500/40"><i className="fas fa-layer-group"></i></div>
                        HD Visual Library
                      </h3>
-                     <Badge color="blue">3 Perspectives Produced</Badge>
+                     <Badge color="blue">{state.variants.length} / 3 Assets Rendered</Badge>
                  </div>
 
-                {state.variants.length > 0 ? (
-                  <div className="grid grid-cols-1 gap-40">
-                    {state.variants.map((v) => (
-                      <div key={v.id} className="rounded-[5rem] overflow-hidden shadow-2xl border-4 dark:border-slate-800 group relative bg-black animate-in zoom-in-95 duration-1000">
-                        <div className="absolute top-16 right-16 z-30 opacity-0 group-hover:opacity-100 transition-all transform translate-y-10 group-hover:translate-y-0">
-                          <button onClick={() => { const a = document.createElement('a'); a.href = v.url; a.download = `${v.type}.png`; a.click(); }} className="bg-white px-16 py-8 rounded-full text-lg font-black text-slate-900 shadow-2xl flex items-center gap-6 hover:bg-red-500 hover:text-white transition-all transform active:scale-90">
-                            <i className="fas fa-cloud-download-alt text-2xl"></i> EXPORT ASSET
-                          </button>
-                        </div>
-                        <div className="p-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-3xl border-b-4 dark:border-slate-800 flex justify-between items-center px-24 relative z-10">
-                           <div className="flex items-center gap-10">
-                              <div className="w-20 h-20 rounded-[2rem] bg-red-500/10 flex items-center justify-center text-red-500 text-3xl font-black">
-                                 {v.type[0]}
-                              </div>
-                              <div>
-                                 <span className="text-lg font-black uppercase tracking-[0.6em] text-red-500 block leading-none mb-2">{v.type} VIEW</span>
-                                 <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Master Production Sample</span>
-                              </div>
-                           </div>
-                           <div className="flex items-center gap-3">
-                              <Badge color="blue">1024 PX</Badge>
-                              <Badge color="amber">AI GENERATED</Badge>
-                           </div>
-                        </div>
-                        <div className="aspect-square bg-[#0a0a0a] relative overflow-hidden flex items-center justify-center">
-                           <img src={v.url} alt={v.type} className="w-full h-full object-cover transition-transform duration-[5000ms] group-hover:scale-110 ease-out" />
-                           <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent pointer-events-none" />
-                        </div>
-                        <div className="p-12 bg-slate-50 dark:bg-slate-950 text-[11px] font-black opacity-30 italic px-24 border-t dark:border-slate-800 tracking-[0.2em] uppercase">
-                          Pipeline Reference: {v.prompt}
-                        </div>
+                <div className="grid grid-cols-1 gap-40">
+                  {['Studio', 'Lifestyle', 'Contextual'].map((type) => {
+                    const v = state.variants.find(item => item.type === type);
+                    return (
+                      <div key={type} className={`rounded-[5rem] overflow-hidden shadow-2xl border-4 transition-all ${isDark ? 'border-slate-800 bg-black' : 'border-slate-100 bg-white'} group relative min-h-[400px] flex flex-col`}>
+                        {v ? (
+                          <>
+                            <div className="absolute top-16 right-16 z-30 opacity-0 group-hover:opacity-100 transition-all transform translate-y-10 group-hover:translate-y-0 flex gap-4">
+                              <button onClick={() => retrySingleVariant(type as any)} className="bg-white/90 backdrop-blur px-8 py-6 rounded-full text-sm font-black text-slate-900 shadow-2xl hover:bg-amber-500 hover:text-white transition-all transform active:scale-90">
+                                <i className="fas fa-sync-alt"></i> REDO
+                              </button>
+                              <button onClick={() => { const a = document.createElement('a'); a.href = v.url; a.download = `${v.type}.png`; a.click(); }} className="bg-white px-12 py-6 rounded-full text-sm font-black text-slate-900 shadow-2xl flex items-center gap-6 hover:bg-red-500 hover:text-white transition-all transform active:scale-90">
+                                <i className="fas fa-cloud-download-alt"></i> EXPORT
+                              </button>
+                            </div>
+                            <div className="p-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-3xl border-b-4 dark:border-slate-800 flex justify-between items-center px-24 relative z-10">
+                               <div className="flex items-center gap-10">
+                                  <div className="w-16 h-16 rounded-[1.5rem] bg-red-500/10 flex items-center justify-center text-red-500 text-2xl font-black">
+                                     {v.type[0]}
+                                  </div>
+                                  <div>
+                                     <span className="text-lg font-black uppercase tracking-[0.6em] text-red-500 block mb-1">{v.type} VIEW</span>
+                                     <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Master Asset Synchronized</span>
+                                  </div>
+                               </div>
+                            </div>
+                            <div className="aspect-square bg-[#0a0a0a] relative overflow-hidden flex items-center justify-center flex-1">
+                               <img src={v.url} alt={v.type} className="w-full h-full object-cover transition-transform duration-[5000ms] group-hover:scale-110 ease-out" />
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex-1 flex flex-col items-center justify-center p-20 text-center gap-8">
+                            <div className="w-24 h-24 rounded-full bg-slate-50 dark:bg-slate-900 flex items-center justify-center text-slate-300">
+                               <i className={`fas ${state.isProcessing ? 'fa-spinner fa-spin' : 'fa-image'} text-4xl opacity-30`}></i>
+                            </div>
+                            <div>
+                               <h4 className="text-2xl font-black uppercase tracking-tighter opacity-30">{type} Render Pending</h4>
+                               {!state.isProcessing && (
+                                 <button onClick={() => retrySingleVariant(type as any)} className="mt-8 px-12 py-5 bg-[#ff4b4b] text-white rounded-full font-black text-xs uppercase shadow-xl hover:bg-red-600 active:scale-95 transition-all">
+                                   <i className="fas fa-bolt mr-2"></i> Generate Individually
+                                 </button>
+                               )}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  !state.isProcessing && (
-                    <div className={`p-32 text-center rounded-[5rem] border-4 border-dashed transition-all ${isDark ? 'border-red-900/40 bg-red-950/10' : 'border-red-100 bg-red-50/50'}`}>
-                      <div className="w-32 h-32 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-12 text-red-500">
-                        <i className="fas fa-triangle-exclamation text-5xl"></i>
-                      </div>
-                      <h4 className="text-4xl font-black text-red-500 mb-6 uppercase tracking-tighter">Render Quota Exceeded</h4>
-                      <p className="text-xl font-medium opacity-60 mb-16 max-w-2xl mx-auto leading-relaxed">Your current Gemini API key has hit a temporary usage limit. Switching to a Priority API Key with billing enabled at AI Studio will restore high-speed production immediately.</p>
-                      <div className="flex flex-col sm:flex-row gap-8 justify-center">
-                        <button onClick={() => state.listing && generateImagesOnly(state.listing.title)} className="px-16 py-7 bg-[#ff4b4b] text-white rounded-[2rem] font-black text-sm uppercase shadow-2xl hover:bg-red-600 transition-all transform hover:-translate-y-2 active:scale-95 shadow-red-500/30">
-                          <i className="fas fa-sync-alt mr-4"></i> Retry Asset Sync
-                        </button>
-                        <button onClick={handleSelectKey} className="px-16 py-7 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-[2rem] font-black text-sm uppercase shadow-2xl hover:bg-slate-50 transition-all border-2 dark:border-slate-700 active:scale-95">
-                          <i className="fas fa-key mr-4 text-red-500"></i> Change API Key
-                        </button>
-                      </div>
-                    </div>
-                  )
-                )}
+                    );
+                  })}
+                </div>
               </section>
             </div>
           )}

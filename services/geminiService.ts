@@ -9,8 +9,9 @@ const parseDataUrl = (dataUrl: string) => {
 
 /**
  * Handles retries for transient errors like 503 (Overloaded) or 429 (Rate Limit).
+ * Includes jitter and exponential backoff.
  */
-async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, retries = 4): Promise<T> {
   let lastError: any;
   for (let i = 0; i < retries; i++) {
     try {
@@ -18,12 +19,14 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
     } catch (err: any) {
       lastError = err;
       const msg = err.message || "";
-      if (msg.includes("503") || msg.includes("429") || msg.includes("overloaded")) {
-        const backoff = Math.pow(2, i) * 1000 + Math.random() * 500;
-        console.warn(`Transient error. Retrying in ${Math.round(backoff)}ms...`);
+      // If it's a quota or overload error, wait and retry
+      if (msg.includes("503") || msg.includes("429") || msg.includes("overloaded") || msg.includes("limit")) {
+        const backoff = Math.pow(2, i) * 1500 + Math.random() * 1000;
+        console.warn(`Transient error (${msg}). Retrying in ${Math.round(backoff)}ms... (Attempt ${i + 1}/${retries})`);
         await new Promise(r => setTimeout(r, backoff));
         continue;
       }
+      // Non-transient errors (like invalid key) throw immediately
       throw err;
     }
   }
@@ -34,7 +37,10 @@ export const generateProfessionalListing = async (
   imagesBase64: string[],
   rawDescription: string
 ): Promise<ProductListing> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) throw new Error("API Key not found in environment variables.");
+  
+  const ai = new GoogleGenAI({ apiKey });
 
   const imageParts = imagesBase64.map(img => {
     const { mimeType, data } = parseDataUrl(img);
@@ -43,7 +49,7 @@ export const generateProfessionalListing = async (
 
   return withRetry(async () => {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview", // Optimal for fast reasoning and JSON output
+      model: "gemini-3-flash-preview",
       contents: {
         parts: [
           ...imageParts,
@@ -91,7 +97,10 @@ export const generateImageVariant = async (
   variantType: 'Studio' | 'Lifestyle' | 'Contextual',
   productTitle: string
 ): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) throw new Error("API Key not found in environment variables.");
+  
+  const ai = new GoogleGenAI({ apiKey });
   const { mimeType, data } = parseDataUrl(originalImageBase64);
 
   const prompts = {
@@ -102,7 +111,7 @@ export const generateImageVariant = async (
 
   return withRetry(async () => {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image', // Native image generation/editing model
+      model: 'gemini-2.5-flash-image',
       contents: {
         parts: [
           { inlineData: { mimeType, data } },

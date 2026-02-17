@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProductListing } from "../types";
 
@@ -11,7 +12,7 @@ export const generateProfessionalListing = async (
   imagesBase64: string[],
   rawDescription: string
 ): Promise<ProductListing> => {
-  // Always initialize with latest API_KEY to ensure bridge functionality works instantly
+  // Direct initialization ensures the most current key is picked up
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const imageParts = imagesBase64.map(img => {
@@ -20,23 +21,15 @@ export const generateProfessionalListing = async (
   });
 
   const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-3-flash-preview", // Fastest reasoning model
     contents: {
       parts: [
         ...imageParts,
         {
-          text: `Act as a senior marketplace content specialist for Flipkart/Amazon.
-          Analyze these images and notes: "${rawDescription}".
-          
-          TASK: Create a professional e-commerce catalog entry.
-          
-          CRITERIA:
-          1. TITLE: [Brand] [Model] [Feature] [Color]. SEO Optimized.
-          2. DESCRIPTION: High-conversion copywriting, 3-4 sentences.
-          3. KEY FEATURES: Top 5 bullet points.
-          4. SPECIFICATIONS: Extract technical specs from visual data as key-value pairs.
-          
-          Return as JSON.`,
+          text: `Act as a senior marketplace content specialist. 
+          Notes: "${rawDescription}".
+          Create a professional SEO listing. 
+          Return as JSON with title, description, keyFeatures (array), and specifications (array of objects with key and value).`,
         },
       ],
     },
@@ -66,7 +59,7 @@ export const generateProfessionalListing = async (
   });
 
   const text = response.text;
-  if (!text) throw new Error("Catalog service returned an empty result.");
+  if (!text) throw new Error("Empty AI response.");
   return JSON.parse(text.trim()) as ProductListing;
 };
 
@@ -75,18 +68,17 @@ export const generateImageVariant = async (
   variantType: 'Studio' | 'Lifestyle' | 'Contextual',
   productTitle: string
 ): Promise<string> => {
-  // Always initialize inside the call for real-time API Key updates
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const { mimeType, data } = parseDataUrl(originalImageBase64);
 
   const prompts = {
-    'Studio': `High-end professional studio catalog photograph of "${productTitle}" on a minimalist clean white background. Uniform lighting, sharp focus, magazine quality. No text.`,
-    'Lifestyle': `Premium lifestyle product photo of "${productTitle}" in an elegant home environment. Cinematic depth of field, natural lighting, luxury aesthetic.`,
-    'Contextual': `Professional shot showing the "${productTitle}" product in context. Highlighting ergonomic design and scale. Professional commercial lighting.`
+    'Studio': `Extreme high-quality professional studio product photography of "${productTitle}" on a seamless pure white background. Minimalist commercial aesthetic, sharp focus.`,
+    'Lifestyle': `Premium lifestyle catalog photo of "${productTitle}" in a luxurious modern interior. Cinematic soft lighting, high-end production value.`,
+    'Contextual': `Professional commercial shot of "${productTitle}" highlighting craftsmanship and design details. Neutral background, magazine quality.`
   };
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-image',
+    model: 'gemini-2.5-flash-image', // Fastest image model for rendering
     contents: {
       parts: [
         { inlineData: { mimeType, data } },
@@ -109,6 +101,6 @@ export const generateImageVariant = async (
     }
   }
 
-  if (!imageUrl) throw new Error(`Model did not produce an image candidate for ${variantType}.`);
+  if (!imageUrl) throw new Error(`Render pipeline failure for ${variantType}.`);
   return imageUrl;
 };

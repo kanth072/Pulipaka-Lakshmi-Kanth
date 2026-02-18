@@ -10,20 +10,9 @@ const parseDataUrl = (dataUrl: string) => {
 // Cache the AI client - no need to recreate on every call
 let cachedClient: GoogleGenAI | null = null;
 
-function getApiKey(): string {
-  // Try all possible env var access methods
-  const key =
-    (typeof process !== 'undefined' && process.env?.API_KEY) ||
-    (typeof import.meta !== 'undefined' && (import.meta as any).env?.API_KEY) ||
-    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_KEY) ||
-    '';
-  console.log("[v0] API_KEY resolved:", !!key, "length:", key?.length ?? 0);
-  return key;
-}
-
 function getClient(): GoogleGenAI {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error("API Key not found. Please set the API_KEY environment variable.");
+  const apiKey = import.meta.env.VITE_API_KEY as string;
+  if (!apiKey) throw new Error("API Key not found. Please set the VITE_API_KEY environment variable.");
   if (!cachedClient) {
     cachedClient = new GoogleGenAI({ apiKey });
   }
@@ -66,7 +55,7 @@ export const generateProfessionalListing = async (
 
   return withRetry(async () => {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-05-20",
+      model: "gemini-2.0-flash",
       contents: {
         parts: [
           ...imageParts,
@@ -125,7 +114,7 @@ export const generateImageVariant = async (
 
   return withRetry(async () => {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-05-20",
+      model: "gemini-2.0-flash",
       contents: {
         parts: [
           { inlineData: { mimeType, data } },

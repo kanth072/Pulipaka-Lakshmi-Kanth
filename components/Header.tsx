@@ -1,3 +1,3 @@
 
-// This file is no longer used in the Streamlit-style layout.
+// Merged into AppSidebar component
 export default () => null;

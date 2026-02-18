@@ -1,11 +1,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
-// https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   define: {
-    // This correctly replaces process.env.API_KEY with the value from your Vercel settings
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || ''),
   },
   server: {
@@ -13,6 +12,6 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: false, // Set to false for cleaner production builds
+    sourcemap: false,
   },
 });

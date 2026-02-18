@@ -9,9 +9,20 @@ const parseDataUrl = (dataUrl: string) => {
 
 // Cache the AI client - no need to recreate on every call
 let cachedClient: GoogleGenAI | null = null;
+
+function getApiKey(): string {
+  // Try all possible env var access methods
+  const key =
+    (typeof process !== 'undefined' && process.env?.API_KEY) ||
+    (typeof import.meta !== 'undefined' && (import.meta as any).env?.API_KEY) ||
+    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_KEY) ||
+    '';
+  console.log("[v0] API_KEY resolved:", !!key, "length:", key?.length ?? 0);
+  return key;
+}
+
 function getClient(): GoogleGenAI {
-  const apiKey = process.env.API_KEY;
-  console.log("[v0] API_KEY present:", !!apiKey, "length:", apiKey?.length ?? 0);
+  const apiKey = getApiKey();
   if (!apiKey) throw new Error("API Key not found. Please set the API_KEY environment variable.");
   if (!cachedClient) {
     cachedClient = new GoogleGenAI({ apiKey });

@@ -11,6 +11,7 @@ const parseDataUrl = (dataUrl: string) => {
 let cachedClient: GoogleGenAI | null = null;
 function getClient(): GoogleGenAI {
   const apiKey = process.env.API_KEY;
+  console.log("[v0] API_KEY present:", !!apiKey, "length:", apiKey?.length ?? 0);
   if (!apiKey) throw new Error("API Key not found. Please set the API_KEY environment variable.");
   if (!cachedClient) {
     cachedClient = new GoogleGenAI({ apiKey });
